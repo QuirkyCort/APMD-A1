@@ -326,6 +326,11 @@ void app_main(void)
                             i2c_set_target_speed(context);
                         }
                         break;
+                    case SPEED_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_speed(context);
+                        }
+                        break;
                 }
             }
         }
