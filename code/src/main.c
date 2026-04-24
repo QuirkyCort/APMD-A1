@@ -67,6 +67,7 @@ static void motor_control_timer_callback(void* arg)
 }
 
 void i2c_version_request(i2c_slave_context_t context) {
+    printf("Version request received\n");
     uint8_t msg[] = {MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION};
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, msg, sizeof(msg), &write_len, 1000));
@@ -90,6 +91,7 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
     msg.kp = motors[channel].speed_pid.kp;
     msg.ki = motors[channel].speed_pid.ki;
     msg.kd = motors[channel].speed_pid.kd;
+    printf("get channel: %d, m: %f, kp: %f, ki: %f, kd: %f\n", channel, msg.m, msg.kp, msg.ki, msg.kd);
 
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &msg, sizeof(msg), &write_len, 1000));
@@ -104,17 +106,17 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
         float ki;
         float kd;
     };
-
-    if (context.length != 1 + sizeof(struct msg)) {
+    printf("context.length: %d, expected: %d\n", context.length, 2 + sizeof(struct msg));
+    if (context.length != 2 + sizeof(struct msg)) {
         return;
     }
-
-    struct msg *msg = (struct msg *) (context.buffer + 1);
-
+    struct msg *msg = (struct msg *) (context.buffer + 2);
+    printf("channel: %d, m: %f, kp: %f, ki: %f, kd: %f\n", channel, msg->m, msg->kp, msg->ki, msg->kd);
     motors[channel].speed_pid.m = msg->m;
     motors[channel].speed_pid.kp = msg->kp;
     motors[channel].speed_pid.ki = msg->ki;
     motors[channel].speed_pid.kd = msg->kd;
+    printf("m: %f, kp: %f, ki: %f, kd: %f\n", motors[channel].speed_pid.m, motors[channel].speed_pid.kp, motors[channel].speed_pid.ki, motors[channel].speed_pid.kd);
 }
 
 void i2c_get_position_pid(i2c_slave_context_t context) {
@@ -146,11 +148,11 @@ void i2c_set_position_pid(i2c_slave_context_t context) {
         float kd;
     };
 
-    if (context.length != 1 + sizeof(struct msg)) {
+    if (context.length != 2 + sizeof(struct msg)) {
         return;
     }
 
-    struct msg *msg = (struct msg *) (context.buffer + 1);
+    struct msg *msg = (struct msg *) (context.buffer + 2);
 
     motors[channel].position_pid.m = msg->m;
     motors[channel].position_pid.kp = msg->kp;
@@ -168,11 +170,11 @@ void i2c_get_pwm_period(i2c_slave_context_t context) {
 void i2c_set_pwm_period(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    if (context.length != 1 + sizeof(int)) {
+    if (context.length != 2 + sizeof(int)) {
         return;
     }
 
-    int *period = (int *) (context.buffer + 1);
+    int *period = (int *) (context.buffer + 2);
     motor_set_period(channel, &motors[channel], *period);
 }
 
@@ -187,11 +189,11 @@ void i2c_get_stop_mode(i2c_slave_context_t context) {
 void i2c_set_stop_mode(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    if (context.length != 2) {
+    if (context.length != 2 + sizeof(uint8_t)) {
         return;
     }
 
-    uint8_t stop_mode = context.buffer[1];
+    uint8_t stop_mode = context.buffer[2];
     motors[channel].stop_mode = stop_mode;
 }
 
@@ -205,13 +207,13 @@ void i2c_get_dc(i2c_slave_context_t context) {
 void i2c_set_dc(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    if (context.length != 1 + sizeof(int16_t)) {
+    if (context.length != 2 + sizeof(int16_t)) {
         return;
     }
 
     xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
     motors[channel].mode = MOTOR_OP_RUN_DC;
-    motor_set_dc(channel, &motors[channel], * (int16_t *) (context.buffer + 1));
+    motor_set_dc(channel, &motors[channel], * (int16_t *) (context.buffer + 2));
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
@@ -225,13 +227,13 @@ void i2c_get_target_speed(i2c_slave_context_t context) {
 void i2c_set_target_speed(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    if (context.length != 1 + sizeof(float)) {
+    if (context.length != 2 + sizeof(float)) {
         return;
     }
 
     xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
     motors[channel].mode = MOTOR_OP_RUN_SPEED;
-    motors[channel].speed_pid.setpoint = *(float *) (context.buffer + 1);
+    motors[channel].speed_pid.setpoint = *(float *) (context.buffer + 2);
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
@@ -244,7 +246,8 @@ void i2c_get_speed(i2c_slave_context_t context) {
 
 void app_main(void)
 {
-    i2c_slave_context_t context = init_i2c_slave_context();
+    i2c_slave_context_t context = {0};
+    init_i2c_slave_context(&context);
 
     // Setup semaphores for motor control
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
@@ -274,7 +277,9 @@ void app_main(void)
     while (true) {
         i2c_slave_event_t evt;
         if (xQueueReceive(context.event_queue, &evt, 10) == pdTRUE) {
+            printf("Received I2C event: %d\n", evt);
             if (evt == I2C_SLAVE_EVT_RECEIVE) {
+                printf("Received I2C command: 0x%02x, length: %d\n", context.command, context.length);
                 switch (context.command) {
                     case VERSION_REGISTER:
                         if (context.length == 2) {

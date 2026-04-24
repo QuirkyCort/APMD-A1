@@ -36,12 +36,12 @@ typedef enum {
 
 typedef struct {
     uint8_t command;
-    char buffer[10];
+    char buffer[32];
     int length;
     QueueHandle_t event_queue;
     i2c_slave_dev_handle_t handle;
 } i2c_slave_context_t;
 
-i2c_slave_context_t init_i2c_slave_context();
+int init_i2c_slave_context(i2c_slave_context_t *context);
 
 #endif // I2C_H

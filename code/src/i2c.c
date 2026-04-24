@@ -27,14 +27,12 @@ static bool i2c_slave_receive_cb(i2c_slave_dev_handle_t i2c_slave, const i2c_sla
     return xTaskWoken;
 }
 
-i2c_slave_context_t init_i2c_slave_context()
+int init_i2c_slave_context(i2c_slave_context_t *context)
 {
-    static i2c_slave_context_t context = {0};
- 
-    context.event_queue = xQueueCreate(16, sizeof(i2c_slave_event_t));
-    if (!context.event_queue) {
+    context->event_queue = xQueueCreate(16, sizeof(i2c_slave_event_t));
+    if (!context->event_queue) {
         printf("Creating queue failed\n");
-        return context;
+        return 1;
     }
 
     i2c_slave_config_t i2c_slv_config = {
@@ -46,13 +44,13 @@ i2c_slave_context_t init_i2c_slave_context()
         .send_buf_depth = 100,
         .receive_buf_depth = 100,
     };
-    ESP_ERROR_CHECK(i2c_new_slave_device(&i2c_slv_config, &context.handle));
+    ESP_ERROR_CHECK(i2c_new_slave_device(&i2c_slv_config, &context->handle));
     
     i2c_slave_event_callbacks_t cbs = {
         .on_receive = i2c_slave_receive_cb,
         .on_request = i2c_slave_request_cb,
     };
-    ESP_ERROR_CHECK(i2c_slave_register_event_callbacks(context.handle, &cbs, &context));
+    ESP_ERROR_CHECK(i2c_slave_register_event_callbacks(context->handle, &cbs, context));
 
-    return context;
+    return 0;
 }
