@@ -13,17 +13,12 @@ static bool i2c_slave_receive_cb(i2c_slave_dev_handle_t i2c_slave, const i2c_sla
 {
     i2c_slave_context_t *context = (i2c_slave_context_t *)arg;
 
-    context->command = evt_data->buffer[0];
-
-    bool valid = false;
-    if (evt_data->buffer[0] == 0x01 && evt_data->length == 2) {
-        valid = true;
-    }
-
-    if (!valid) {
+    if (evt_data->length > sizeof(context->buffer)) {
         return 0;
     }
 
+    context->command = evt_data->buffer[0];
+    context->length = evt_data->length;
     memcpy(context->buffer, evt_data->buffer, evt_data->length);
 
     BaseType_t xTaskWoken = 0;

@@ -8,15 +8,16 @@
 #include "pcnt.h"
 
 #define COMPARE_MAX 1000
+#define DEFAULT_PERIOD 1000 // 1ms in microseconds
 
-typedef enum {
-    MOTOR_OP_NONE,
-    MOTOR_OP_RUN_DC,
-    MOTOR_OP_RUN_SPEED,
-    MOTOR_OP_HOLD,
+typedef enum : uint8_t {
+    MOTOR_OP_NONE = 0,
+    MOTOR_OP_RUN_DC = 1,
+    MOTOR_OP_RUN_SPEED = 2,
+    MOTOR_OP_HOLD = 3,
 } motor_operating_mode_t;
 
-typedef enum {
+typedef enum : uint8_t {
     MOTOR_STOP_BRAKE = 1,
     MOTOR_STOP_HOLD = 2,
 } motor_stop_mode_t;
@@ -24,17 +25,24 @@ typedef enum {
 typedef struct {
     motor_operating_mode_t mode;
     motor_stop_mode_t stop_mode;
-    pid_ctrl_t pid;
+    pid_ctrl_t speed_pid;
+    pid_ctrl_t position_pid;
     pcnt_unit_handle_t pcnt_unit;
+    uint16_t period; // in microseconds
     int pulse_count;
-    int speed; // Actual, not set point
-    int power; // -1000 to 1000, where 1000 is full forward and -1000 is full reverse
-    int max_speed; // Used when running with ramp
+    int16_t speed; // Actual, not set point. In pulses per second.
+    int16_t dc; // -1000 to 1000, where 1000 is full forward and -1000 is full reverse
+    int16_t max_speed; // Used when running with ramp
     int target_position;
+    mcpwm_timer_handle_t timer;
+    mcpwm_oper_handle_t operator;
+    mcpwm_cmpr_handle_t comparator;
+    mcpwm_gen_handle_t generator;
 } motor_t;
 
 
-void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_pid, motor_t* motors);
-void motor_set_speed(int channel, int speed);
+void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_speed_pid, pid_ctrl_t default_position_pid, motor_t* motors);
+void motor_set_dc(int channel, motor_t *motor, int dc);
+void motor_set_period(int channel, motor_t *motor, int period);
 
 #endif // MOTOR_H

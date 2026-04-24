@@ -1,22 +1,22 @@
 #include "motor.h"
 
 static const int (*gpios)[2];
-static int compare_values[] = {0, 0, 0, 0, 0, 0};
-static int periods[] = {1000, 1000, 1000, 1000, 1000, 1000};
 
-static mcpwm_timer_handle_t timers[6];
-static mcpwm_oper_handle_t operators[6];
-static mcpwm_cmpr_handle_t comparators[6];
-static mcpwm_gen_handle_t generators[6];
+// static mcpwm_timer_handle_t timers[6];
+// static mcpwm_oper_handle_t operators[6];
+// static mcpwm_cmpr_handle_t comparators[6];
+// static mcpwm_gen_handle_t generators[6];
 
-void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_pid, motor_t* motors) {
+void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_speed_pid, pid_ctrl_t default_position_pid, motor_t* motors) {
      for (int i = 0; i < motor_count; i++) {
-        memcpy(&motors[i].pid, &default_pid, sizeof(pid_ctrl_t));
+        memcpy(&motors[i].speed_pid, &default_speed_pid, sizeof(pid_ctrl_t));
+        memcpy(&motors[i].position_pid, &default_position_pid, sizeof(pid_ctrl_t));
         motors[i].mode = MOTOR_OP_RUN_SPEED;
         motors[i].stop_mode = MOTOR_STOP_BRAKE;
+        motors[i].period = DEFAULT_PERIOD; // default period 1ms
         motors[i].pulse_count = 0;
         motors[i].speed = 0;
-        motors[i].power = 0;
+        motors[i].dc = 0;
         motors[i].max_speed = 0;
         motors[i].target_position = 0;
     }
@@ -30,52 +30,52 @@ void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_
             .group_id = group_id,
             .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
             .resolution_hz = 1000000, // 1 MHz resolution (1 us per tick)
-            .period_ticks = periods[i], // 1 ms period
+            .period_ticks = DEFAULT_PERIOD, // 1 ms period
             .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         };
-        ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &timers[i]));
+        ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &motors[i].timer));
         mcpwm_operator_config_t operator_config = {
             .group_id = group_id, // operator must be in the same group to the timer
         };
-        ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &operators[i]));
-        ESP_ERROR_CHECK(mcpwm_operator_connect_timer(operators[i], timers[i]));
+        ESP_ERROR_CHECK(mcpwm_new_operator(&operator_config, &motors[i].operator));
+        ESP_ERROR_CHECK(mcpwm_operator_connect_timer(motors[i].operator, motors[i].timer));
 
         mcpwm_comparator_config_t comparator_config = {
             .flags.update_cmp_on_tez = true,
         };
-        ESP_ERROR_CHECK(mcpwm_new_comparator(operators[i], &comparator_config, &comparators[i]));
+        ESP_ERROR_CHECK(mcpwm_new_comparator(motors[i].operator, &comparator_config, &motors[i].comparator));
 
         mcpwm_generator_config_t generator_config = {
             .gen_gpio_num = gpios[i][0],
         };
-        ESP_ERROR_CHECK(mcpwm_new_generator(operators[i], &generator_config, &generators[i]));
+        ESP_ERROR_CHECK(mcpwm_new_generator(motors[i].operator, &generator_config, &motors[i].generator));
 
-        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparators[i], compare_values[i]));
+        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motors[i].comparator, 0)); // default duty cycle 0%
 
         // high on timer empty
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
-            generators[i],
+            motors[i].generator,
             MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)
         ));
         // go low on compare threshold
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
-            generators[i],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparators[i], MCPWM_GEN_ACTION_HIGH)
+            motors[i].generator,
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motors[i].comparator, MCPWM_GEN_ACTION_HIGH)
         ));
 
         gpio_reset_pin(gpios[i][1]);
         gpio_set_direction(gpios[i][1], GPIO_MODE_OUTPUT);
         gpio_set_level(gpios[i][1], 1);
 
-        ESP_ERROR_CHECK(mcpwm_timer_enable(timers[i]));
-        ESP_ERROR_CHECK(mcpwm_timer_start_stop(timers[i], MCPWM_TIMER_START_NO_STOP));
+        ESP_ERROR_CHECK(mcpwm_timer_enable(motors[i].timer));
+        ESP_ERROR_CHECK(mcpwm_timer_start_stop(motors[i].timer, MCPWM_TIMER_START_NO_STOP));
     }
 }
 
-void motor_set_speed(int channel, int speed) {
+void motor_set_dc(int channel, motor_t *motor, int dc) {
     // Swap generator to the other GPIO pin if direction changed
-    if (compare_values[channel] >= 0 && speed < 0) {
-        ESP_ERROR_CHECK(mcpwm_del_generator(generators[channel]));
+    if (motor->dc >= 0 && dc < 0) {
+        ESP_ERROR_CHECK(mcpwm_del_generator(motor->generator));
         gpio_reset_pin(gpios[channel][0]);
         gpio_set_direction(gpios[channel][0], GPIO_MODE_OUTPUT);
         gpio_set_level(gpios[channel][0], 1);
@@ -83,18 +83,18 @@ void motor_set_speed(int channel, int speed) {
         mcpwm_generator_config_t generator_config = {
             .gen_gpio_num = gpios[channel][1],
         };
-        ESP_ERROR_CHECK(mcpwm_new_generator(operators[channel], &generator_config, &generators[channel]));
+        ESP_ERROR_CHECK(mcpwm_new_generator(motor->operator, &generator_config, &motor->generator));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
-            generators[channel],
+            motor->generator,
             MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)
         ));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
-            generators[channel],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparators[channel], MCPWM_GEN_ACTION_HIGH)
+            motor->generator,
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor->comparator, MCPWM_GEN_ACTION_HIGH)
         ));
 
-    } else if (compare_values[channel] < 0 && speed >= 0) {
-        ESP_ERROR_CHECK(mcpwm_del_generator(generators[channel]));
+    } else if (motor->dc < 0 && dc >= 0) {
+        ESP_ERROR_CHECK(mcpwm_del_generator(motor->generator));
         gpio_reset_pin(gpios[channel][1]);
         gpio_set_direction(gpios[channel][1], GPIO_MODE_OUTPUT);
         gpio_set_level(gpios[channel][1], 1);
@@ -102,19 +102,23 @@ void motor_set_speed(int channel, int speed) {
         mcpwm_generator_config_t generator_config = {
             .gen_gpio_num = gpios[channel][0],
         };
-        ESP_ERROR_CHECK(mcpwm_new_generator(operators[channel], &generator_config, &generators[channel]));
+        ESP_ERROR_CHECK(mcpwm_new_generator(motor->operator, &generator_config, &motor->generator));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(
-            generators[channel],
+            motor->generator,
             MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)
         ));
         ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(
-            generators[channel],
-            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, comparators[channel], MCPWM_GEN_ACTION_HIGH)
+            motor->generator,
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, motor->comparator, MCPWM_GEN_ACTION_HIGH)
         )); 
     }
+    motor->dc = dc;
 
-    speed = speed * periods[channel] / COMPARE_MAX; // scale speed to timer period
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor->comparator, abs(motor->dc * motor->period / COMPARE_MAX)));
+}
 
-    compare_values[channel] = speed;
-    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(comparators[channel], abs(speed)));
+void motor_set_period(int channel, motor_t *motor, int period) {
+    motor->period = period;
+    ESP_ERROR_CHECK(mcpwm_timer_set_period(motor->timer, period));
+    ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor->comparator, abs(motor->dc * motor->period / COMPARE_MAX)));
 }
