@@ -235,6 +235,13 @@ void i2c_set_target_speed(i2c_slave_context_t context) {
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
+void i2c_get_speed(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+    
+    uint32_t write_len;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].speed, sizeof(motors[channel].speed), &write_len, 1000));
+}
+
 void app_main(void)
 {
     i2c_slave_context_t context = init_i2c_slave_context();
