@@ -68,11 +68,23 @@ static void motor_control_timer_callback(void* arg)
     }
 }
 
-void i2c_version_request(i2c_slave_context_t context) {
-    printf("Version request received\n");
-    uint8_t msg[] = {MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION};
+static int i2c_write_from_buffer(i2c_slave_context_t context, const uint8_t *data, uint32_t buffer_size) {
     uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, msg, sizeof(msg), &write_len, 1000));
+    uint32_t total_written = 0;
+    while (total_written < buffer_size) {
+        i2c_slave_write(context.handle, data, buffer_size, &write_len, 1000);
+        if (write_len == 0) {
+            return 1;
+        }
+        total_written += write_len;
+    }
+
+    return 0;
+}
+
+void i2c_version_request(i2c_slave_context_t context) {
+    uint8_t msg[] = {MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION};
+    i2c_write_from_buffer(context, msg, sizeof(msg));
 }
 
 void i2c_reset_cmd(i2c_slave_context_t context) {
@@ -98,8 +110,7 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
     msg.ki = motors[channel].speed_pid.ki;
     msg.kd = motors[channel].speed_pid.kd;
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &msg, sizeof(msg), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &msg, sizeof(msg));
 }
 
 void i2c_set_speed_pid(i2c_slave_context_t context) {
@@ -125,11 +136,12 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
     motors[channel].speed_pid.kp = msg->kp;
     motors[channel].speed_pid.ki = msg->ki;
     motors[channel].speed_pid.kd = msg->kd;
-    printf("m: %f, kp: %f, ki: %f, kd: %f\n", motors[channel].speed_pid.m, motors[channel].speed_pid.kp, motors[channel].speed_pid.ki, motors[channel].speed_pid.kd);
 }
 
 void i2c_get_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    // printf("Getting position PID for channel %d\n", channel);
 
     if (channel < 0 || channel >= MOTOR_CHANNELS) {
         return;
@@ -147,12 +159,15 @@ void i2c_get_position_pid(i2c_slave_context_t context) {
     msg.ki = motors[channel].position_pid.ki;
     msg.kd = motors[channel].position_pid.kd;
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &msg, sizeof(msg), &write_len, 1000));
+    // printf("Position PID for channel %d: m=%.2f, kp=%.2f, ki=%.2f, kd=%.2f\n", channel, msg.m, msg.kp, msg.ki, msg.kd);
+
+    i2c_write_from_buffer(context, (uint8_t*) &msg, sizeof(msg));
 }
 
 void i2c_set_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    // printf("Setting position PID for channel %d\n", channel);
 
     if (channel < 0 || channel >= MOTOR_CHANNELS) {
         return;
@@ -165,11 +180,15 @@ void i2c_set_position_pid(i2c_slave_context_t context) {
         float kd;
     };
 
+    // printf("Position PID message received for channel %d\n", channel);
+
     if (context.length != 2 + sizeof(struct msg)) {
         return;
     }
 
     struct msg *msg = (struct msg *) (context.buffer + 2);
+
+    // printf("Setting position PID for channel %d: m=%.2f, kp=%.2f, ki=%.2f, kd=%.2f\n", channel, msg->m, msg->kp, msg->ki, msg->kd);
 
     motors[channel].position_pid.m = msg->m;
     motors[channel].position_pid.kp = msg->kp;
@@ -184,8 +203,7 @@ void i2c_get_pwm_period(i2c_slave_context_t context) {
         return;
     }
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].period, sizeof(motors[channel].period), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].period, sizeof(motors[channel].period));
 }
 
 void i2c_set_pwm_period(i2c_slave_context_t context) {
@@ -195,11 +213,11 @@ void i2c_set_pwm_period(i2c_slave_context_t context) {
         return;
     }
 
-    if (context.length != 2 + sizeof(int)) {
+    if (context.length != 2 + sizeof(int16_t)) {
         return;
     }
 
-    int *period = (int *) (context.buffer + 2);
+    int16_t *period = (int16_t *) (context.buffer + 2);
     motor_set_period(channel, &motors[channel], *period);
 }
 
@@ -210,9 +228,7 @@ void i2c_get_stop_mode(i2c_slave_context_t context) {
         return;
     }
 
-    uint8_t stop_mode = motors[channel].stop_mode;
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, &stop_mode, sizeof(stop_mode), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].stop_mode, sizeof(motors[channel].stop_mode));
 }
 
 void i2c_set_stop_mode(i2c_slave_context_t context) {
@@ -237,8 +253,7 @@ void i2c_get_dc(i2c_slave_context_t context) {
         return;
     }
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].dc, sizeof(motors[channel].dc), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].dc, sizeof(motors[channel].dc));
 }
 
 void i2c_set_dc(i2c_slave_context_t context) {
@@ -265,8 +280,7 @@ void i2c_get_target_speed(i2c_slave_context_t context) {
         return;
     }
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].speed_pid.setpoint, sizeof(motors[channel].speed_pid.setpoint), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].speed_pid.setpoint, sizeof(motors[channel].speed_pid.setpoint));
 }
 
 void i2c_set_target_speed(i2c_slave_context_t context) {
@@ -293,8 +307,7 @@ void i2c_get_speed(i2c_slave_context_t context) {
         return;
     }
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].speed, sizeof(motors[channel].speed), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].speed, sizeof(motors[channel].speed));
 }
 
 void i2c_get_steps(i2c_slave_context_t context) {
@@ -304,8 +317,7 @@ void i2c_get_steps(i2c_slave_context_t context) {
         return;
     }
 
-    uint32_t write_len;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].steps, sizeof(motors[channel].steps), &write_len, 1000));
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].steps, sizeof(motors[channel].steps));
 }
 
 void i2c_clear_steps(i2c_slave_context_t context) {
@@ -320,6 +332,7 @@ void i2c_clear_steps(i2c_slave_context_t context) {
     }
 
     if (context.buffer[2] == 1) {
+        pcnt_unit_clear_count(motors[channel].pcnt_unit);
         motors[channel].steps = 0;
     }
 }
@@ -357,9 +370,9 @@ void app_main(void)
     while (true) {
         i2c_slave_event_t evt;
         if (xQueueReceive(context.event_queue, &evt, 10) == pdTRUE) {
-            printf("Received I2C event: %d\n", evt);
+            // printf("Received I2C event: %d\n", evt);
             if (evt == I2C_SLAVE_EVT_RECEIVE) {
-                printf("Received I2C command: 0x%02x, length: %d\n", context.command, context.length);
+                // printf("Received I2C command: 0x%02x, length: %d\n", context.command, context.length);
                 switch (context.command) {
                     case VERSION_REGISTER:
                         if (context.length == 2) {

@@ -33,7 +33,7 @@ typedef struct {
     int16_t speed; // Actual, not set point. In pulses per second.
     int16_t dc; // -1000 to 1000, where 1000 is full forward and -1000 is full reverse
     int16_t max_speed; // Used when running with ramp
-    int target_position;
+    int32_t target_position;
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t operator;
     mcpwm_cmpr_handle_t comparator;
@@ -42,7 +42,7 @@ typedef struct {
 
 
 void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_speed_pid, pid_ctrl_t default_position_pid, motor_t* motors);
-void motor_set_dc(int channel, motor_t *motor, int dc);
-void motor_set_period(int channel, motor_t *motor, int period);
+void motor_set_dc(int channel, motor_t *motor, int16_t dc);
+void motor_set_period(int channel, motor_t *motor, uint16_t period);
 
 #endif // MOTOR_H

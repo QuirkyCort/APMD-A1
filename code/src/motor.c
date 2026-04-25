@@ -72,7 +72,7 @@ void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_
     }
 }
 
-void motor_set_dc(int channel, motor_t *motor, int dc) {
+void motor_set_dc(int channel, motor_t *motor, int16_t dc) {
     // Swap generator to the other GPIO pin if direction changed
     if (motor->dc >= 0 && dc < 0) {
         ESP_ERROR_CHECK(mcpwm_del_generator(motor->generator));
@@ -117,7 +117,7 @@ void motor_set_dc(int channel, motor_t *motor, int dc) {
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor->comparator, abs(motor->dc * motor->period / COMPARE_MAX)));
 }
 
-void motor_set_period(int channel, motor_t *motor, int period) {
+void motor_set_period(int channel, motor_t *motor, uint16_t period) {
     motor->period = period;
     ESP_ERROR_CHECK(mcpwm_timer_set_period(motor->timer, period));
     ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(motor->comparator, abs(motor->dc * motor->period / COMPARE_MAX)));
