@@ -8,7 +8,6 @@
 #include "pcnt.h"
 
 #define COMPARE_MAX 1000
-#define DEFAULT_PERIOD 1000 // 1ms in microseconds
 
 typedef enum : uint8_t {
     MOTOR_OP_NONE = 0,
@@ -41,7 +40,7 @@ typedef struct {
 } motor_t;
 
 
-void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_speed_pid, pid_ctrl_t default_position_pid, motor_t* motors);
+void motor_init(const int motor_gpios[][2], int motor_count, motor_t* motors);
 void motor_set_dc(int channel, motor_t *motor, int16_t dc);
 void motor_set_period(int channel, motor_t *motor, uint16_t period);
 

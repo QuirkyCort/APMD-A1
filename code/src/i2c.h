@@ -16,6 +16,7 @@
 // second byte refers to the motor / servo channel (...or ignored where not applicable)
 #define VERSION_REGISTER 0x00
 #define RESET_REGISTER 0x01
+#define SAVE_SETTINGS_REGISTER 0x02
 #define SPEED_PID_REGISTER 0x10
 #define POSITION_PID_REGISTER 0x11
 #define PWM_PERIOD_REGISTER 0x12

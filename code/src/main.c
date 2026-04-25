@@ -8,43 +8,8 @@
 #include "pcnt.h"
 #include "motor.h"
 #include "servo.h"
-
-#define MAJOR_VERSION 1
-#define MINOR_VERSION 1
-#define PATCH_VERSION 1
-
-#define MOTOR_CHANNELS 2
-#define PID_BASE_PERIOD 20000 // 10ms in microseconds
-
-#define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10
-
-const int PCNT_GPIO[MOTOR_CHANNELS][2] = {
-    {4, 5},
-    {8, 9},
-};
-
-const int MOTOR_GPIO[MOTOR_CHANNELS][2] = {
-    {6, 7},
-    {10, 11},
-};
-
-const int SERVO_PINS[] = { 48, 47 };
-
-pid_ctrl_t default_speed_pid = {
-    .m = 0.8,
-    .kp = 1.0,
-    .ki = 1.5,
-    .kd = -0.01,
-    .limit = 1000.0,
-};
-
-pid_ctrl_t default_position_pid = {
-    .m = 0.0,
-    .kp = 16.0,
-    .ki = 0.0,
-    .kd = 0.0,
-    .limit = 1500.0,
-};
+#include "nvs.h"
+#include "config.h"
 
 motor_t motors[MOTOR_CHANNELS];
 SemaphoreHandle_t motors_write_locks[MOTOR_CHANNELS];
@@ -86,13 +51,31 @@ static void motor_control_timer_callback(void* arg)
     }
 }
 
+static void reset_to_factory_settings() {
+    for (int i = 0; i < MOTOR_CHANNELS; i++) {
+        xSemaphoreTake(motors_write_locks[i], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
+        memcpy(&motors[i].speed_pid, &default_speed_pid, sizeof(pid_ctrl_t));
+        memcpy(&motors[i].position_pid, &default_position_pid, sizeof(pid_ctrl_t));
+        motors[i].mode = MOTOR_OP_RUN_SPEED;
+        motors[i].stop_mode = MOTOR_STOP_BRAKE;
+        motors[i].period = DEFAULT_PERIOD;
+        motors[i].steps = 0;
+        motors[i].speed = 0;
+        motors[i].dc = 0;
+        motors[i].max_speed = 0;
+        motors[i].target_position = 0;
+        pcnt_unit_clear_count(motors[i].pcnt_unit);
+        xSemaphoreGive(motors_write_locks[i]);
+    }
+}
+
 static int i2c_write_from_buffer(i2c_slave_context_t context, const uint8_t *data, uint32_t buffer_size) {
     uint32_t write_len;
     uint32_t total_written = 0;
     while (total_written < buffer_size) {
         i2c_slave_write(context.handle, data, buffer_size, &write_len, 1000);
         if (write_len == 0) {
-            return 1;
+            return -1;
         }
         total_written += write_len;
     }
@@ -106,7 +89,28 @@ void i2c_version_request(i2c_slave_context_t context) {
 }
 
 void i2c_reset_cmd(i2c_slave_context_t context) {
+    if (context.length != 3) {
+        return;
+    }
+        
+    if (context.buffer[2] == 1) {
+        reset_to_factory_settings();
+    } else if (context.buffer[2] == 2) {
+        get_settings_from_nvs(motors);
+    } else if (context.buffer[2] == 3) {
+        reset_to_factory_settings();
+        get_settings_from_nvs(motors);
+    }
+}
 
+void i2c_save_settings_cmd(i2c_slave_context_t context) {
+    if (context.length != 3) {
+        return;
+    }        
+
+    if (context.buffer[2] == 1) {
+        save_settings_to_nvs(motors);   
+    }
 }
 
 void i2c_get_speed_pid(i2c_slave_context_t context) {
@@ -116,14 +120,7 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
         return;
     }
 
-    struct {
-        float m;
-        float kp;
-        float ki;
-        float kd;
-        float limit;
-    } __attribute__((packed)) msg;
-
+    pid_settings_t msg;
     msg.m = motors[channel].speed_pid.m;
     msg.kp = motors[channel].speed_pid.kp;
     msg.ki = motors[channel].speed_pid.ki;
@@ -140,19 +137,11 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
         return;
     }
 
-    struct __attribute__((packed)) msg {
-        float m;
-        float kp;
-        float ki;
-        float kd;
-        float limit;
-    };
-
-    if (context.length != 2 + sizeof(struct msg)) {
+    if (context.length != 2 + sizeof(pid_settings_t)) {
         return;
     }
 
-    struct msg *msg = (struct msg *) (context.buffer + 2);
+    pid_settings_t *msg = (pid_settings_t *) (context.buffer + 2);
     motors[channel].speed_pid.m = msg->m;
     motors[channel].speed_pid.kp = msg->kp;
     motors[channel].speed_pid.ki = msg->ki;
@@ -163,27 +152,16 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
 void i2c_get_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    // printf("Getting position PID for channel %d\n", channel);
-
     if (channel < 0 || channel >= MOTOR_CHANNELS) {
         return;
     }
 
-    struct {
-        float m;
-        float kp;
-        float ki;
-        float kd;
-        float limit;
-    } __attribute__((packed)) msg;
-
+    pid_settings_t msg;
     msg.m = motors[channel].position_pid.m;
     msg.kp = motors[channel].position_pid.kp;
     msg.ki = motors[channel].position_pid.ki;
     msg.kd = motors[channel].position_pid.kd;
     msg.limit = motors[channel].position_pid.limit;
-
-    // printf("Position PID for channel %d: m=%.2f, kp=%.2f, ki=%.2f, kd=%.2f\n", channel, msg.m, msg.kp, msg.ki, msg.kd);
 
     i2c_write_from_buffer(context, (uint8_t*) &msg, sizeof(msg));
 }
@@ -191,30 +169,15 @@ void i2c_get_position_pid(i2c_slave_context_t context) {
 void i2c_set_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
-    // printf("Setting position PID for channel %d\n", channel);
-
     if (channel < 0 || channel >= MOTOR_CHANNELS) {
         return;
     }
 
-    struct __attribute__((packed)) msg {
-        float m;
-        float kp;
-        float ki;
-        float kd;
-        float limit;
-    };
-
-    // printf("Position PID message received for channel %d\n", channel);
-
-    if (context.length != 2 + sizeof(struct msg)) {
+    if (context.length != 2 + sizeof(pid_settings_t)) {
         return;
     }
 
-    struct msg *msg = (struct msg *) (context.buffer + 2);
-
-    // printf("Setting position PID for channel %d: m=%.2f, kp=%.2f, ki=%.2f, kd=%.2f\n", channel, msg->m, msg->kp, msg->ki, msg->kd);
-
+    pid_settings_t *msg = (pid_settings_t *) (context.buffer + 2);
     motors[channel].position_pid.m = msg->m;
     motors[channel].position_pid.kp = msg->kp;
     motors[channel].position_pid.ki = msg->ki;
@@ -398,6 +361,13 @@ void app_main(void)
     i2c_slave_context_t context = {0};
     init_i2c_slave_context(&context);
 
+    // Initialize Non-Volatile Storage (NVS)
+    init_settings_nvs();
+
+    // Initialize motor settings
+    reset_to_factory_settings();
+    get_settings_from_nvs(motors);
+
     // Setup semaphores for motor control
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
         motors_write_locks[i] = xSemaphoreCreateBinary();
@@ -413,7 +383,7 @@ void app_main(void)
     }
 
     // Initialize motor control
-    motor_init(MOTOR_GPIO, MOTOR_CHANNELS, default_speed_pid, default_position_pid, motors);
+    motor_init(MOTOR_GPIO, MOTOR_CHANNELS, motors);
 
     // Prep motor update timer
     const esp_timer_create_args_t periodic_timer_args = {
@@ -437,6 +407,9 @@ void app_main(void)
                         break;
                     case RESET_REGISTER:
                         i2c_reset_cmd(context);
+                        break;
+                    case SAVE_SETTINGS_REGISTER:
+                        i2c_save_settings_cmd(context);
                         break;
                     case SPEED_PID_REGISTER:
                         if (context.length == 2) {

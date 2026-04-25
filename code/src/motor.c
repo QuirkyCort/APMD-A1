@@ -7,20 +7,7 @@ static const int (*gpios)[2];
 // static mcpwm_cmpr_handle_t comparators[6];
 // static mcpwm_gen_handle_t generators[6];
 
-void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_speed_pid, pid_ctrl_t default_position_pid, motor_t* motors) {
-     for (int i = 0; i < motor_count; i++) {
-        memcpy(&motors[i].speed_pid, &default_speed_pid, sizeof(pid_ctrl_t));
-        memcpy(&motors[i].position_pid, &default_position_pid, sizeof(pid_ctrl_t));
-        motors[i].mode = MOTOR_OP_RUN_SPEED;
-        motors[i].stop_mode = MOTOR_STOP_BRAKE;
-        motors[i].period = DEFAULT_PERIOD; // default period 1ms
-        motors[i].steps = 0;
-        motors[i].speed = 0;
-        motors[i].dc = 0;
-        motors[i].max_speed = 0;
-        motors[i].target_position = 0;
-    }
-
+void motor_init(const int motor_gpios[][2], int motor_count, motor_t* motors) {
     gpios = motor_gpios;
 
     // Initialize MCPWM timer
@@ -30,7 +17,7 @@ void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_
             .group_id = group_id,
             .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
             .resolution_hz = 1000000, // 1 MHz resolution (1 us per tick)
-            .period_ticks = DEFAULT_PERIOD, // 1 ms period
+            .period_ticks = motors[i].period, // 1 ms period
             .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
         };
         ESP_ERROR_CHECK(mcpwm_new_timer(&timer_config, &motors[i].timer));
