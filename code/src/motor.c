@@ -14,7 +14,7 @@ void motor_init(const int motor_gpios[][2], int motor_count, pid_ctrl_t default_
         motors[i].mode = MOTOR_OP_RUN_SPEED;
         motors[i].stop_mode = MOTOR_STOP_BRAKE;
         motors[i].period = DEFAULT_PERIOD; // default period 1ms
-        motors[i].pulse_count = 0;
+        motors[i].steps = 0;
         motors[i].speed = 0;
         motors[i].dc = 0;
         motors[i].max_speed = 0;

@@ -13,20 +13,22 @@
 #define MINOR_VERSION 1
 #define PATCH_VERSION 1
 
-#define MOTOR_CHANNELS 1
+#define MOTOR_CHANNELS 2
 #define PID_BASE_PERIOD 20000 // 10ms in microseconds
 
 #define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10
 
 const int PCNT_GPIO[MOTOR_CHANNELS][2] = {
     {4, 5},
+    {8, 9},
 };
 
 const int MOTOR_GPIO[MOTOR_CHANNELS][2] = {
     {6, 7},
+    {10, 11},
 };
 
-const int LED_PINS[] = { 48, 47, 20, 19 };
+const int SERVO_PINS[] = { 48, 47, 20, 19 };
 
 pid_ctrl_t default_speed_pid = {
     .m = 0.8,
@@ -49,10 +51,10 @@ static void motor_control_timer_callback(void* arg)
 {
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
         // Calculate speed
-        int pulse_count = 0;
-        ESP_ERROR_CHECK(pcnt_unit_get_count(motors[i].pcnt_unit, &pulse_count));
-        motors[i].speed = (pulse_count - motors[i].pulse_count) * 1000000 / PID_BASE_PERIOD; // Convert to pulses per second
-        motors[i].pulse_count = pulse_count;
+        int steps = 0;
+        ESP_ERROR_CHECK(pcnt_unit_get_count(motors[i].pcnt_unit, &steps));
+        motors[i].speed = (steps - motors[i].steps) * 1000000 / PID_BASE_PERIOD; // Convert to pulses per second
+        motors[i].steps = steps;
 
         // Update motor control based on operating mode
         if (motors[i].mode == MOTOR_OP_RUN_DC) {
@@ -80,6 +82,10 @@ void i2c_reset_cmd(i2c_slave_context_t context) {
 void i2c_get_speed_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     struct {
         float m;
         float kp;
@@ -91,7 +97,6 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
     msg.kp = motors[channel].speed_pid.kp;
     msg.ki = motors[channel].speed_pid.ki;
     msg.kd = motors[channel].speed_pid.kd;
-    printf("get channel: %d, m: %f, kp: %f, ki: %f, kd: %f\n", channel, msg.m, msg.kp, msg.ki, msg.kd);
 
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &msg, sizeof(msg), &write_len, 1000));
@@ -100,18 +105,22 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
 void i2c_set_speed_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     struct __attribute__((packed)) msg {
         float m;
         float kp;
         float ki;
         float kd;
     };
-    printf("context.length: %d, expected: %d\n", context.length, 2 + sizeof(struct msg));
+
     if (context.length != 2 + sizeof(struct msg)) {
         return;
     }
+
     struct msg *msg = (struct msg *) (context.buffer + 2);
-    printf("channel: %d, m: %f, kp: %f, ki: %f, kd: %f\n", channel, msg->m, msg->kp, msg->ki, msg->kd);
     motors[channel].speed_pid.m = msg->m;
     motors[channel].speed_pid.kp = msg->kp;
     motors[channel].speed_pid.ki = msg->ki;
@@ -121,6 +130,10 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
 
 void i2c_get_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     struct {
         float m;
@@ -140,6 +153,10 @@ void i2c_get_position_pid(i2c_slave_context_t context) {
 
 void i2c_set_position_pid(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     struct __attribute__((packed)) msg {
         float m;
@@ -163,12 +180,20 @@ void i2c_set_position_pid(i2c_slave_context_t context) {
 void i2c_get_pwm_period(i2c_slave_context_t context) {
     int channel = context.buffer[1];
 
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].period, sizeof(motors[channel].period), &write_len, 1000));
 }
 
 void i2c_set_pwm_period(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     if (context.length != 2 + sizeof(int)) {
         return;
@@ -181,6 +206,10 @@ void i2c_set_pwm_period(i2c_slave_context_t context) {
 void i2c_get_stop_mode(i2c_slave_context_t context) {
     int channel = context.buffer[1];
     
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     uint8_t stop_mode = motors[channel].stop_mode;
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, &stop_mode, sizeof(stop_mode), &write_len, 1000));
@@ -188,6 +217,10 @@ void i2c_get_stop_mode(i2c_slave_context_t context) {
 
 void i2c_set_stop_mode(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     if (context.length != 2 + sizeof(uint8_t)) {
         return;
@@ -200,12 +233,20 @@ void i2c_set_stop_mode(i2c_slave_context_t context) {
 void i2c_get_dc(i2c_slave_context_t context) {
     int channel = context.buffer[1];
     
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].dc, sizeof(motors[channel].dc), &write_len, 1000));
 }
 
 void i2c_set_dc(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     if (context.length != 2 + sizeof(int16_t)) {
         return;
@@ -220,12 +261,20 @@ void i2c_set_dc(i2c_slave_context_t context) {
 void i2c_get_target_speed(i2c_slave_context_t context) {
     int channel = context.buffer[1];
     
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].speed_pid.setpoint, sizeof(motors[channel].speed_pid.setpoint), &write_len, 1000));
 }
 
 void i2c_set_target_speed(i2c_slave_context_t context) {
     int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
 
     if (context.length != 2 + sizeof(float)) {
         return;
@@ -240,8 +289,39 @@ void i2c_set_target_speed(i2c_slave_context_t context) {
 void i2c_get_speed(i2c_slave_context_t context) {
     int channel = context.buffer[1];
     
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
     uint32_t write_len;
     ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].speed, sizeof(motors[channel].speed), &write_len, 1000));
+}
+
+void i2c_get_steps(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+    
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    uint32_t write_len;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(i2c_slave_write(context.handle, (uint8_t*) &motors[channel].steps, sizeof(motors[channel].steps), &write_len, 1000));
+}
+
+void i2c_clear_steps(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    if (context.length != 2 + 1) {
+        return;
+    }
+
+    if (context.buffer[2] == 1) {
+        motors[channel].steps = 0;
+    }
 }
 
 void app_main(void)
@@ -256,7 +336,7 @@ void app_main(void)
     }
  
     // Initialize servo pins
-    // servo_init(LED_PINS, sizeof(LED_PINS) / sizeof(LED_PINS[0]));
+    // servo_init(SERVO_PINS, sizeof(SERVO_PINS) / sizeof(SERVO_PINS[0]));
 
     // Initialize pulse counter
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
@@ -334,6 +414,16 @@ void app_main(void)
                     case SPEED_REGISTER:
                         if (context.length == 2) {
                             i2c_get_speed(context);
+                        }
+                        break;
+                    case STEPS_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_steps(context);
+                        }
+                        break;
+                    case CLEAR_STEPS_REGISTER:
+                        if (context.length == 2) {
+                            i2c_clear_steps(context);
                         }
                         break;
                 }

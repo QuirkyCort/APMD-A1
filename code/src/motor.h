@@ -29,7 +29,7 @@ typedef struct {
     pid_ctrl_t position_pid;
     pcnt_unit_handle_t pcnt_unit;
     uint16_t period; // in microseconds
-    int pulse_count;
+    int32_t steps;
     int16_t speed; // Actual, not set point. In pulses per second.
     int16_t dc; // -1000 to 1000, where 1000 is full forward and -1000 is full reverse
     int16_t max_speed; // Used when running with ramp
