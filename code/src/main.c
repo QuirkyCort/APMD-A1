@@ -52,16 +52,25 @@ static void motor_control_timer_callback(void* arg)
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
         // Calculate speed
         int steps = 0;
+        if (xSemaphoreTakeFromISR(motors_write_locks[i], NULL) == pdFALSE) {
+            continue;
+        }
         ESP_ERROR_CHECK(pcnt_unit_get_count(motors[i].pcnt_unit, &steps));
         motors[i].speed = (steps - motors[i].steps) * 1000000 / PID_BASE_PERIOD; // Convert to pulses per second
         motors[i].steps = steps;
+        xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
 
         // Update motor control based on operating mode
         if (motors[i].mode == MOTOR_OP_RUN_DC) {
             // motor_set_dc should be called by the function that sets the DC, so we don't need to do anything here
             continue;
         } else if (motors[i].mode == MOTOR_OP_RUN_SPEED) {
-            int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
+            int dc = 0;
+            if (motors[i].speed_pid.setpoint == 0 && motors[i].speed == 0) {
+                motors[i].speed_pid.integral = 0; // Clear integral when stopped
+            } else {
+                dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
+            }
             motor_set_dc(i, &motors[i], dc);
         }
 
@@ -332,8 +341,10 @@ void i2c_clear_steps(i2c_slave_context_t context) {
     }
 
     if (context.buffer[2] == 1) {
+        xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
         pcnt_unit_clear_count(motors[channel].pcnt_unit);
         motors[channel].steps = 0;
+        xSemaphoreGive(motors_write_locks[channel]);
     }
 }
 
@@ -435,9 +446,7 @@ void app_main(void)
                         }
                         break;
                     case CLEAR_STEPS_REGISTER:
-                        if (context.length == 2) {
-                            i2c_clear_steps(context);
-                        }
+                        i2c_clear_steps(context);
                         break;
                 }
             }
