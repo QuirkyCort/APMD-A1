@@ -7,10 +7,10 @@ int pid_update(pid_ctrl_t* pid, float measurement, int dt_us) {
 
     // Update integral term with anti-windup
     pid->integral += error * dt_us / 1000000.0;
-    if (pid->integral > HIGH_LIMIT) {
-        pid->integral = HIGH_LIMIT;
-    } else if (pid->integral < LOW_LIMIT) {
-        pid->integral = LOW_LIMIT;
+    if (pid->integral > pid->limit) {
+        pid->integral = pid->limit;
+    } else if (pid->integral < -pid->limit) {
+        pid->integral = -pid->limit;
     }
 
     float derivative = (error - pid->previous_error) / (dt_us / 1000000.0);
@@ -19,10 +19,10 @@ int pid_update(pid_ctrl_t* pid, float measurement, int dt_us) {
     int output = (int) (base + pid->kp * error + pid->ki * pid->integral + pid->kd * derivative);
 
     // Clamp output to limits
-    if (output > HIGH_LIMIT) {
-        output = HIGH_LIMIT;
-    } else if (output < LOW_LIMIT) {
-        output = LOW_LIMIT;
+    if (output > pid->limit) {
+        output = pid->limit;
+    } else if (output < -pid->limit) {
+        output = -pid->limit;
     }
 
     return output;

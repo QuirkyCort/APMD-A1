@@ -28,20 +28,22 @@ const int MOTOR_GPIO[MOTOR_CHANNELS][2] = {
     {10, 11},
 };
 
-const int SERVO_PINS[] = { 48, 47, 20, 19 };
+const int SERVO_PINS[] = { 48, 47 };
 
 pid_ctrl_t default_speed_pid = {
     .m = 0.8,
     .kp = 1.0,
     .ki = 1.5,
     .kd = -0.01,
+    .limit = 1000.0,
 };
 
 pid_ctrl_t default_position_pid = {
-    .m = 0,
-    .kp = 1.0,
-    .ki = 1.5,
-    .kd = -0.01,
+    .m = 0.0,
+    .kp = 16.0,
+    .ki = 0.0,
+    .kd = 0.0,
+    .limit = 1500.0,
 };
 
 motor_t motors[MOTOR_CHANNELS];
@@ -61,6 +63,9 @@ static void motor_control_timer_callback(void* arg)
         xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
 
         // Update motor control based on operating mode
+        if (xSemaphoreTakeFromISR(motors_write_locks[i], NULL) == pdFALSE) {
+            continue;
+        }
         if (motors[i].mode == MOTOR_OP_RUN_DC) {
             // motor_set_dc should be called by the function that sets the DC, so we don't need to do anything here
             continue;
@@ -72,8 +77,12 @@ static void motor_control_timer_callback(void* arg)
                 dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
             }
             motor_set_dc(i, &motors[i], dc);
+        } else if (motors[i].mode == MOTOR_OP_HOLD_POSITION) {
+            motors[i].speed_pid.setpoint = pid_update(&motors[i].position_pid, motors[i].steps, PID_BASE_PERIOD);
+            int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
+            motor_set_dc(i, &motors[i], dc);
         }
-
+        xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
     }
 }
 
@@ -112,12 +121,14 @@ void i2c_get_speed_pid(i2c_slave_context_t context) {
         float kp;
         float ki;
         float kd;
+        float limit;
     } __attribute__((packed)) msg;
 
     msg.m = motors[channel].speed_pid.m;
     msg.kp = motors[channel].speed_pid.kp;
     msg.ki = motors[channel].speed_pid.ki;
     msg.kd = motors[channel].speed_pid.kd;
+    msg.limit = motors[channel].speed_pid.limit;
 
     i2c_write_from_buffer(context, (uint8_t*) &msg, sizeof(msg));
 }
@@ -134,6 +145,7 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
         float kp;
         float ki;
         float kd;
+        float limit;
     };
 
     if (context.length != 2 + sizeof(struct msg)) {
@@ -145,6 +157,7 @@ void i2c_set_speed_pid(i2c_slave_context_t context) {
     motors[channel].speed_pid.kp = msg->kp;
     motors[channel].speed_pid.ki = msg->ki;
     motors[channel].speed_pid.kd = msg->kd;
+    motors[channel].speed_pid.limit = msg->limit;
 }
 
 void i2c_get_position_pid(i2c_slave_context_t context) {
@@ -161,12 +174,14 @@ void i2c_get_position_pid(i2c_slave_context_t context) {
         float kp;
         float ki;
         float kd;
+        float limit;
     } __attribute__((packed)) msg;
 
     msg.m = motors[channel].position_pid.m;
     msg.kp = motors[channel].position_pid.kp;
     msg.ki = motors[channel].position_pid.ki;
     msg.kd = motors[channel].position_pid.kd;
+    msg.limit = motors[channel].position_pid.limit;
 
     // printf("Position PID for channel %d: m=%.2f, kp=%.2f, ki=%.2f, kd=%.2f\n", channel, msg.m, msg.kp, msg.ki, msg.kd);
 
@@ -187,6 +202,7 @@ void i2c_set_position_pid(i2c_slave_context_t context) {
         float kp;
         float ki;
         float kd;
+        float limit;
     };
 
     // printf("Position PID message received for channel %d\n", channel);
@@ -203,6 +219,7 @@ void i2c_set_position_pid(i2c_slave_context_t context) {
     motors[channel].position_pid.kp = msg->kp;
     motors[channel].position_pid.ki = msg->ki;
     motors[channel].position_pid.kd = msg->kd;
+    motors[channel].position_pid.limit = msg->limit;
 }
 
 void i2c_get_pwm_period(i2c_slave_context_t context) {
@@ -348,6 +365,34 @@ void i2c_clear_steps(i2c_slave_context_t context) {
     }
 }
 
+void i2c_get_target_position(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+    
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].position_pid.setpoint, sizeof(motors[channel].position_pid.setpoint));
+}
+
+void i2c_set_target_position(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    if (context.length != 2 + sizeof(float)) {
+        return;
+    }
+
+    xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
+    motors[channel].mode = MOTOR_OP_HOLD_POSITION;
+    motors[channel].position_pid.setpoint = *(float *) (context.buffer + 2);
+    xSemaphoreGive(motors_write_locks[channel]);
+}
+
+
 void app_main(void)
 {
     i2c_slave_context_t context = {0};
@@ -360,7 +405,7 @@ void app_main(void)
     }
  
     // Initialize servo pins
-    // servo_init(SERVO_PINS, sizeof(SERVO_PINS) / sizeof(SERVO_PINS[0]));
+    servo_init(SERVO_PINS, sizeof(SERVO_PINS) / sizeof(SERVO_PINS[0]));
 
     // Initialize pulse counter
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
@@ -447,6 +492,13 @@ void app_main(void)
                         break;
                     case CLEAR_STEPS_REGISTER:
                         i2c_clear_steps(context);
+                        break;
+                    case TARGET_POSITION_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_target_position(context);
+                        } else {
+                            i2c_set_target_position(context);
+                        }
                         break;
                 }
             }

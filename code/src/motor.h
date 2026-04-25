@@ -14,7 +14,7 @@ typedef enum : uint8_t {
     MOTOR_OP_NONE = 0,
     MOTOR_OP_RUN_DC = 1,
     MOTOR_OP_RUN_SPEED = 2,
-    MOTOR_OP_HOLD = 3,
+    MOTOR_OP_HOLD_POSITION = 3,
 } motor_operating_mode_t;
 
 typedef enum : uint8_t {

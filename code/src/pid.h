@@ -1,15 +1,13 @@
 #ifndef PID_H
 #define PID_H
 
-#define HIGH_LIMIT 1000
-#define LOW_LIMIT  -1000
-
 
 typedef struct pid_ctrl_t {
     float m;
     float kp;
     float ki;
     float kd;
+    float limit;
     float setpoint;
     float integral;
     float previous_error;
