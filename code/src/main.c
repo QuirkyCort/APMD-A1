@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -15,8 +16,7 @@ motor_t motors[MOTOR_CHANNELS];
 SemaphoreHandle_t motors_write_locks[MOTOR_CHANNELS];
 servo_t servos[SERVO_CHANNELS];
 
-static void motor_control_timer_callback(void* arg)
-{
+static void motor_control() {
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
         // Calculate speed
         int steps = 0;
@@ -39,15 +39,22 @@ static void motor_control_timer_callback(void* arg)
             int dc = 0;
             if (motors[i].speed_pid.setpoint == 0 && motors[i].speed == 0) {
                 motors[i].speed_pid.integral = 0; // Clear integral when stopped
+                motors[i].status = MOTOR_STOPPED;
             } else {
                 dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_PERIOD);
             }
             motor_set_dc(i, &motors[i], dc);
         } else if (motors[i].mode == MOTOR_OP_HOLD_POSITION) {
+            if (fabs(motors[i].position_pid.setpoint - motors[i].steps) < POSITION_TOLERANCE && motors[i].speed < SPEED_TOLERANCE) {
+                motors[i].status = MOTOR_STOPPED;
+            }
             motors[i].speed_pid.setpoint = pid_update(&motors[i].position_pid, motors[i].steps, PID_PERIOD);
             int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_PERIOD);
             motor_set_dc(i, &motors[i], dc);
         } else if (motors[i].mode == MOTOR_OP_RUN_TO_POSITION) {
+            if (fabs(motors[i].position_pid.setpoint - motors[i].steps) < POSITION_TOLERANCE && motors[i].speed < SPEED_TOLERANCE) {
+                motors[i].status = MOTOR_STOPPED;
+            }
             float speed = pid_update(&motors[i].position_pid, motors[i].steps, PID_PERIOD);
             if (motors[i].max_speed > 0) {
                 if (speed > motors[i].max_speed) {
@@ -64,6 +71,37 @@ static void motor_control_timer_callback(void* arg)
     }
 }
 
+static void servo_control() {
+    for (int i = 0; i < SERVO_CHANNELS; i++) {
+        if (servos[i].mode == SERVO_OP_RUN_TO_DC) {
+            float rate = servos[i].speed * PID_PERIOD / 1000000; // Convert to duty cycle change per control period
+            if (servos[i].direction == SERVO_UP) {
+                if (servos[i].dc < servos[i].target_dc) {
+                    uint32_t new_dc = servos[i].dc + rate;
+                    if (new_dc > servos[i].target_dc) {
+                        new_dc = servos[i].target_dc;
+                    }
+                    servo_set_dc(i, &servos[i], new_dc);
+                }
+            } else if (servos[i].direction == SERVO_DOWN) {
+                if (servos[i].dc > servos[i].target_dc) {
+                    uint32_t new_dc = servos[i].dc - rate;
+                    if (new_dc < servos[i].target_dc) {
+                        new_dc = servos[i].target_dc;
+                    }
+                    servo_set_dc(i, &servos[i], new_dc);
+                }
+            }
+        }
+    }
+}
+
+static void control_timer_callback(void* arg)
+{
+    motor_control();
+    servo_control();
+}
+
 static void reset_to_factory_settings() {
     for (int i = 0; i < MOTOR_CHANNELS; i++) {
         xSemaphoreTake(motors_write_locks[i], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
@@ -71,6 +109,7 @@ static void reset_to_factory_settings() {
         memcpy(&motors[i].position_pid, &default_position_pid, sizeof(pid_ctrl_t));
         motors[i].mode = MOTOR_OP_RUN_SPEED;
         motors[i].stop_mode = MOTOR_STOP_BRAKE;
+        motors[i].status = MOTOR_STOPPED;
         motors[i].period = MOTOR_DEFAULT_PERIOD;
         motors[i].steps = 0;
         motors[i].speed = 0;
@@ -83,6 +122,7 @@ static void reset_to_factory_settings() {
     for (int i = 0; i < SERVO_CHANNELS; i++) {
         servo_set_dc(i, &servos[i], 0);
         servo_set_freq(i, &servos[i], SERVO_DEFAULT_FREQ);
+        servos[i].mode = SERVO_OP_RUN_DC;
     }
 }
 
@@ -273,9 +313,16 @@ void i2c_set_dc(i2c_slave_context_t context) {
         return;
     }
 
+    int16_t *dc = (int16_t *) (context.buffer + 2);
+
     xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
     motors[channel].mode = MOTOR_OP_RUN_DC;
-    motor_set_dc(channel, &motors[channel], * (int16_t *) (context.buffer + 2));
+    if (*dc != 0) {
+        motors[channel].status = MOTOR_RUNNING;
+    } else {
+        motors[channel].status = MOTOR_STOPPED;
+    }
+    motor_set_dc(channel, &motors[channel], *dc);
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
@@ -300,9 +347,14 @@ void i2c_set_target_speed(i2c_slave_context_t context) {
         return;
     }
 
+    float *target_speed = (float *) (context.buffer + 2);
+
     xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
     motors[channel].mode = MOTOR_OP_RUN_SPEED;
-    motors[channel].speed_pid.setpoint = *(float *) (context.buffer + 2);
+    if (*target_speed != 0) {
+        motors[channel].status = MOTOR_RUNNING;
+    }
+    motors[channel].speed_pid.setpoint = *target_speed;
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
@@ -366,9 +418,14 @@ void i2c_set_target_position(i2c_slave_context_t context) {
         return;
     }
 
+    float *target_position = (float *) (context.buffer + 2);
+    
     xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
     motors[channel].mode = MOTOR_OP_HOLD_POSITION;
-    motors[channel].position_pid.setpoint = *(float *) (context.buffer + 2);
+    if (*target_position != motors[channel].steps) {
+        motors[channel].status = MOTOR_RUNNING;
+    }
+    motors[channel].position_pid.setpoint = *target_position;
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
@@ -398,8 +455,21 @@ void i2c_run_to_position(i2c_slave_context_t context) {
     } else {
         motors[channel].position_pid.setpoint = payload.position;
     }
+    if (motors[channel].position_pid.setpoint != motors[channel].steps) {
+        motors[channel].status = MOTOR_RUNNING;
+    }
     motors[channel].max_speed = payload.max_speed;
     xSemaphoreGive(motors_write_locks[channel]);
+}
+
+void i2c_get_motor_status(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+    
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    i2c_write_from_buffer(context, (uint8_t*) &motors[channel].status, sizeof(motors[channel].status));
 }
 
 void i2c_get_servo_freq(i2c_slave_context_t context) {
@@ -452,8 +522,37 @@ void i2c_set_servo_dc(i2c_slave_context_t context) {
         return;
     }
 
+    servos[channel].mode = SERVO_OP_RUN_DC;
     uint16_t *dc = (uint16_t *) (context.buffer + 2);
     servo_set_dc(channel, &servos[channel], *dc);
+}
+
+void i2c_servo_run_to_dc(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= SERVO_CHANNELS) {
+        return;
+    }
+
+    struct __attribute__((packed)) {
+        uint16_t target_dc;  // uint32 on metal, uint16 over wire
+        float speed;
+    } payload;
+
+    if (context.length != 2 + sizeof(payload)) {
+        return;
+    }
+
+    payload = *(typeof(payload) *) (context.buffer + 2);
+
+    servos[channel].mode = SERVO_OP_RUN_TO_DC;
+    if (payload.target_dc > servos[channel].dc) {
+        servos[channel].direction = SERVO_UP;
+    } else if (payload.target_dc < servos[channel].dc) {
+        servos[channel].direction = SERVO_DOWN;
+    }
+    servos[channel].target_dc = payload.target_dc;
+    servos[channel].speed = payload.speed;
 }
 
 void app_main(void)
@@ -487,7 +586,7 @@ void app_main(void)
 
     // Prep motor update timer
     const esp_timer_create_args_t periodic_timer_args = {
-        .callback = &motor_control_timer_callback,
+        .callback = &control_timer_callback,
     };
     esp_timer_handle_t periodic_timer;
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
@@ -496,9 +595,7 @@ void app_main(void)
     while (true) {
         i2c_slave_event_t evt;
         if (xQueueReceive(context.event_queue, &evt, 10) == pdTRUE) {
-            // printf("Received I2C event: %d\n", evt);
             if (evt == I2C_SLAVE_EVT_RECEIVE) {
-                // printf("Received I2C command: 0x%02x, length: %d\n", context.command, context.length);
                 switch (context.command) {
                     case VERSION_REGISTER:
                         if (context.length == 2) {
@@ -576,6 +673,11 @@ void app_main(void)
                     case RUN_TO_POSITION_REGISTER:
                         i2c_run_to_position(context);
                         break;
+                    case MOTOR_STATUS_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_motor_status(context);
+                        }
+                        break;
                     case SERVO_FREQ_REGISTER:
                         if (context.length == 2) {
                             i2c_get_servo_freq(context);
@@ -589,6 +691,9 @@ void app_main(void)
                         } else {
                             i2c_set_servo_dc(context);
                         }
+                        break;
+                    case SERVO_RUN_TO_DC_REGISTER:
+                        i2c_servo_run_to_dc(context);
                         break;
                 }
             }

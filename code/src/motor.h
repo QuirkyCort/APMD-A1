@@ -22,9 +22,15 @@ typedef enum : uint8_t {
     MOTOR_STOP_HOLD = 2,
 } motor_stop_mode_t;
 
+typedef enum : uint8_t {
+    MOTOR_STOPPED = 1,
+    MOTOR_RUNNING = 2
+} motor_status_t;
+
 typedef struct {
     motor_operating_mode_t mode;
     motor_stop_mode_t stop_mode;
+    motor_status_t status;
     pid_ctrl_t speed_pid;
     pid_ctrl_t position_pid;
     pcnt_unit_handle_t pcnt_unit;

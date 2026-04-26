@@ -19,6 +19,9 @@
 #define MOTOR_DEFAULT_PERIOD 1000 // 1ms in microseconds
 #define SERVO_DEFAULT_FREQ   50 // Frequency in Hertz. Set frequency at 50 Hz
 
+#define POSITION_TOLERANCE 10 // In steps
+#define SPEED_TOLERANCE 10 // In steps per second
+
 #define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10 // For getting semaphore
 
 extern const int PCNT_GPIO[MOTOR_CHANNELS][2];
