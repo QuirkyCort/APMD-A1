@@ -9,11 +9,13 @@
 
 #define MOTOR_CHANNELS 2
 #define SERVO_CHANNELS 2
-#define PID_BASE_PERIOD 20000 // 10ms in microseconds
+
+#define PID_PERIOD 20000 // 10ms in microseconds
 
 #define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10
 
-#define DEFAULT_PERIOD 1000 // 1ms in microseconds
+#define MOTOR_DEFAULT_PERIOD 1000 // 1ms in microseconds
+#define SERVO_DEFAULT_FREQ   50 // Frequency in Hertz. Set frequency at 50 Hz
 
 extern const int PCNT_GPIO[MOTOR_CHANNELS][2];
 extern const int MOTOR_GPIO[MOTOR_CHANNELS][2];

@@ -2,6 +2,9 @@
 #define SERVO_H
 
 #include "driver/ledc.h"
+#include "config.h"
+
+#define LEDC_CHANNEL            LEDC_CHANNEL_0
 
 
 void servo_init(const int pins[], int pin_count);

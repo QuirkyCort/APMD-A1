@@ -14,6 +14,7 @@ typedef enum : uint8_t {
     MOTOR_OP_RUN_DC = 1,
     MOTOR_OP_RUN_SPEED = 2,
     MOTOR_OP_HOLD_POSITION = 3,
+    MOTOR_OP_RUN_TO_POSITION = 4,
 } motor_operating_mode_t;
 
 typedef enum : uint8_t {
@@ -31,7 +32,7 @@ typedef struct {
     int32_t steps;
     int16_t speed; // Actual, not set point. In pulses per second.
     int16_t dc; // -1000 to 1000, where 1000 is full forward and -1000 is full reverse
-    int16_t max_speed; // Used when running with ramp
+    uint16_t max_speed; // Used when running with ramp and running to position with speed limit
     int32_t target_position;
     mcpwm_timer_handle_t timer;
     mcpwm_oper_handle_t operator;

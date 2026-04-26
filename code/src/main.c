@@ -23,7 +23,7 @@ static void motor_control_timer_callback(void* arg)
             continue;
         }
         ESP_ERROR_CHECK(pcnt_unit_get_count(motors[i].pcnt_unit, &steps));
-        motors[i].speed = (steps - motors[i].steps) * 1000000 / PID_BASE_PERIOD; // Convert to pulses per second
+        motors[i].speed = (steps - motors[i].steps) * 1000000 / PID_PERIOD; // Convert to pulses per second
         motors[i].steps = steps;
         xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
 
@@ -39,12 +39,24 @@ static void motor_control_timer_callback(void* arg)
             if (motors[i].speed_pid.setpoint == 0 && motors[i].speed == 0) {
                 motors[i].speed_pid.integral = 0; // Clear integral when stopped
             } else {
-                dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
+                dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_PERIOD);
             }
             motor_set_dc(i, &motors[i], dc);
         } else if (motors[i].mode == MOTOR_OP_HOLD_POSITION) {
-            motors[i].speed_pid.setpoint = pid_update(&motors[i].position_pid, motors[i].steps, PID_BASE_PERIOD);
-            int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_BASE_PERIOD);
+            motors[i].speed_pid.setpoint = pid_update(&motors[i].position_pid, motors[i].steps, PID_PERIOD);
+            int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_PERIOD);
+            motor_set_dc(i, &motors[i], dc);
+        } else if (motors[i].mode == MOTOR_OP_RUN_TO_POSITION) {
+            float speed = pid_update(&motors[i].position_pid, motors[i].steps, PID_PERIOD);
+            if (motors[i].max_speed > 0) {
+                if (speed > motors[i].max_speed) {
+                    speed = motors[i].max_speed;
+                } else if (speed < -motors[i].max_speed) {
+                    speed = -motors[i].max_speed;
+                }
+            }
+            motors[i].speed_pid.setpoint = speed;
+            int dc = pid_update(&motors[i].speed_pid, motors[i].speed, PID_PERIOD);
             motor_set_dc(i, &motors[i], dc);
         }
         xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
@@ -58,7 +70,7 @@ static void reset_to_factory_settings() {
         memcpy(&motors[i].position_pid, &default_position_pid, sizeof(pid_ctrl_t));
         motors[i].mode = MOTOR_OP_RUN_SPEED;
         motors[i].stop_mode = MOTOR_STOP_BRAKE;
-        motors[i].period = DEFAULT_PERIOD;
+        motors[i].period = MOTOR_DEFAULT_PERIOD;
         motors[i].steps = 0;
         motors[i].speed = 0;
         motors[i].dc = 0;
@@ -355,6 +367,35 @@ void i2c_set_target_position(i2c_slave_context_t context) {
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
+void i2c_run_to_position(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= MOTOR_CHANNELS) {
+        return;
+    }
+
+    struct {
+        uint8_t relative;
+        float position;
+        uint16_t max_speed;
+    } payload;
+
+    if (context.length != 2 + sizeof(payload)) {
+        return;
+    }
+
+    payload = *(typeof(payload) *) (context.buffer + 2);
+
+    xSemaphoreTake(motors_write_locks[channel], pdTICKS_TO_MS(MOTOR_CONTROL_LOCK_TIMEOUT_MS));
+    motors[channel].mode = MOTOR_OP_RUN_TO_POSITION;
+    if (payload.relative) {
+        motors[channel].position_pid.setpoint = motors[channel].steps + payload.position;
+    } else {
+        motors[channel].position_pid.setpoint = payload.position;
+    }
+    motors[channel].max_speed = payload.max_speed;
+    xSemaphoreGive(motors_write_locks[channel]);
+}
 
 void app_main(void)
 {
@@ -391,7 +432,7 @@ void app_main(void)
     };
     esp_timer_handle_t periodic_timer;
     ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, PID_BASE_PERIOD));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, PID_PERIOD));
 
     while (true) {
         i2c_slave_event_t evt;
@@ -472,6 +513,9 @@ void app_main(void)
                         } else {
                             i2c_set_target_position(context);
                         }
+                        break;
+                    case RUN_TO_POSITION_REGISTER:
+                        i2c_run_to_position(context);
                         break;
                 }
             }

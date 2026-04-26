@@ -1,8 +1,5 @@
 #include "servo.h"
 
-#define LEDC_CHANNEL            LEDC_CHANNEL_0
-#define LEDC_FREQUENCY          (50) // Frequency in Hertz. Set frequency at 50 Hz
-
 void servo_init(const int pins[], int pin_count)
 {
     for (int i = 0; i < pin_count; i++) {
@@ -11,7 +8,7 @@ void servo_init(const int pins[], int pin_count)
             .speed_mode       = LEDC_LOW_SPEED_MODE,
             .duty_resolution  = LEDC_TIMER_12_BIT,
             .timer_num        = i,
-            .freq_hz          = LEDC_FREQUENCY,
+            .freq_hz          = SERVO_DEFAULT_FREQ,
             .clk_cfg          = LEDC_USE_RC_FAST_CLK,
         };
         ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
