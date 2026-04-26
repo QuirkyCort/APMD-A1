@@ -6,7 +6,7 @@ void servo_init(const int pins[], int pin_count)
         // Prepare and then apply the LEDC PWM timer configuration
         ledc_timer_config_t ledc_timer = {
             .speed_mode       = LEDC_LOW_SPEED_MODE,
-            .duty_resolution  = LEDC_TIMER_12_BIT,
+            .duty_resolution  = LEDC_TIMER_14_BIT,
             .timer_num        = i,
             .freq_hz          = SERVO_DEFAULT_FREQ, // uint32_t
             .clk_cfg          = LEDC_USE_RC_FAST_CLK,
