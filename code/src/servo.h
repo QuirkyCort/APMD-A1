@@ -22,13 +22,13 @@ typedef struct {
     servo_operating_mode_t mode;
     servo_direction_t direction;
     uint32_t freq;
-    uint32_t dc;
+    float dc;
     uint32_t target_dc;
     float speed; // Used in RUN_TO_DC to specify the speed of change of duty cycle in units of duty cycle per second
 } servo_t;
 
 void servo_init(const int pins[], int pin_count);
-void servo_set_dc(int channel, servo_t *servo, uint32_t duty);
+void servo_set_dc(int channel, servo_t *servo, float duty);
 void servo_set_freq(int channel, servo_t *servo, uint32_t freq);
 
 #endif // SERVO_H

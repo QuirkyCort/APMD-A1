@@ -68,10 +68,10 @@ static void motor_control() {
 static void servo_control() {
     for (int i = 0; i < SERVO_CHANNELS; i++) {
         if (servos[i].mode == SERVO_OP_RUN_TO_DC) {
-            float rate = servos[i].speed * PID_PERIOD / 1000000; // Convert to duty cycle change per control period
+            float rate = servos[i].speed * PID_PERIOD / 1000000.0f; // Convert to duty cycle change per control period
             if (servos[i].direction == SERVO_UP) {
                 if (servos[i].dc < servos[i].target_dc) {
-                    uint32_t new_dc = servos[i].dc + rate;
+                    float new_dc = servos[i].dc + rate;
                     if (new_dc > servos[i].target_dc) {
                         new_dc = servos[i].target_dc;
                     }
@@ -79,7 +79,7 @@ static void servo_control() {
                 }
             } else if (servos[i].direction == SERVO_DOWN) {
                 if (servos[i].dc > servos[i].target_dc) {
-                    uint32_t new_dc = servos[i].dc - rate;
+                    float new_dc = servos[i].dc - rate;
                     if (new_dc < servos[i].target_dc) {
                         new_dc = servos[i].target_dc;
                     }
@@ -500,7 +500,7 @@ void i2c_get_servo_dc(i2c_slave_context_t context) {
         return;
     }
 
-    uint16_t dc = servos[channel].dc; // uint32 on metal, uint16 over wire
+    uint16_t dc = (uint16_t) servos[channel].dc; // uint32 on metal, uint16 over wire
 
     i2c_write_from_buffer(context, (uint8_t*) &dc, sizeof(dc));
 }

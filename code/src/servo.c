@@ -26,8 +26,8 @@ void servo_init(const int pins[], int pin_count)
     }
 }
 
-void servo_set_dc(int channel, servo_t *servo, uint32_t duty) {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, duty));
+void servo_set_dc(int channel, servo_t *servo, float duty) {
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, (uint32_t) duty));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ledc_update_duty(LEDC_LOW_SPEED_MODE, channel));
     servo->dc = duty;
 }
