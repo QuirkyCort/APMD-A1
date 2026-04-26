@@ -13,6 +13,7 @@
 
 motor_t motors[MOTOR_CHANNELS];
 SemaphoreHandle_t motors_write_locks[MOTOR_CHANNELS];
+servo_t servos[SERVO_CHANNELS];
 
 static void motor_control_timer_callback(void* arg)
 {
@@ -78,6 +79,10 @@ static void reset_to_factory_settings() {
         motors[i].target_position = 0;
         pcnt_unit_clear_count(motors[i].pcnt_unit);
         xSemaphoreGive(motors_write_locks[i]);
+    }
+    for (int i = 0; i < SERVO_CHANNELS; i++) {
+        servo_set_dc(i, &servos[i], 0);
+        servo_set_freq(i, &servos[i], SERVO_DEFAULT_FREQ);
     }
 }
 
@@ -397,6 +402,60 @@ void i2c_run_to_position(i2c_slave_context_t context) {
     xSemaphoreGive(motors_write_locks[channel]);
 }
 
+void i2c_get_servo_freq(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= SERVO_CHANNELS) {
+        return;
+    }
+
+    uint32_t freq = servos[channel].freq;
+
+    i2c_write_from_buffer(context, (uint8_t*) &freq, sizeof(freq));
+}
+
+void i2c_set_servo_freq(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= SERVO_CHANNELS) {
+        return;
+    }
+
+    if (context.length != 2 + sizeof(int32_t)) {
+        return;
+    }
+
+    int32_t *freq = (int32_t *) (context.buffer + 2);
+    servo_set_freq(channel, &servos[channel], *freq);
+}
+
+void i2c_get_servo_dc(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= SERVO_CHANNELS) {
+        return;
+    }
+
+    uint16_t dc = servos[channel].dc; // uint32 on metal, uint16 over wire
+
+    i2c_write_from_buffer(context, (uint8_t*) &dc, sizeof(dc));
+}
+
+void i2c_set_servo_dc(i2c_slave_context_t context) {
+    int channel = context.buffer[1];
+
+    if (channel < 0 || channel >= SERVO_CHANNELS) {
+        return;
+    }
+
+    if (context.length != 2 + sizeof(uint16_t)) { // uint32 on metal, uint16 over wire
+        return;
+    }
+
+    uint16_t *dc = (uint16_t *) (context.buffer + 2);
+    servo_set_dc(channel, &servos[channel], *dc);
+}
+
 void app_main(void)
 {
     i2c_slave_context_t context = {0};
@@ -516,6 +575,20 @@ void app_main(void)
                         break;
                     case RUN_TO_POSITION_REGISTER:
                         i2c_run_to_position(context);
+                        break;
+                    case SERVO_FREQ_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_servo_freq(context);
+                        } else {
+                            i2c_set_servo_freq(context);
+                        }
+                        break;
+                    case SERVO_DC_REGISTER:
+                        if (context.length == 2) {
+                            i2c_get_servo_dc(context);
+                        } else {
+                            i2c_set_servo_dc(context);
+                        }
                         break;
                 }
             }

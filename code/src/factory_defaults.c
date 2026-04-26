@@ -10,7 +10,7 @@ const int MOTOR_GPIO[MOTOR_CHANNELS][2] = {
     {10, 11},
 };
 
-const int SERVO_PINS[] = { 48, 47 };
+const int SERVO_PINS[] = { 17, 18 };
 
 pid_ctrl_t default_speed_pid = {
     .m = 0.8,

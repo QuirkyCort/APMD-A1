@@ -7,10 +7,9 @@
 #include "freertos/task.h"
 #include "driver/i2c_slave.h"
 
-#define I2C_SLAVE_SCL_IO 15
-#define I2C_SLAVE_SDA_IO 16
+#include "config.h"
+
 #define I2C_SLAVE_NUM    0
-#define ESP_SLAVE_ADDR   0x56
 
 // We use a 2 bytes register address, the first byte is the register and the
 // second byte refers to the motor / servo channel (...or ignored where not applicable)

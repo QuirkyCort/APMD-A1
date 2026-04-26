@@ -7,15 +7,19 @@
 #define MINOR_VERSION 1
 #define PATCH_VERSION 1
 
+#define I2C_SLAVE_SCL_IO 15
+#define I2C_SLAVE_SDA_IO 16
+#define ESP_SLAVE_ADDR   0x56
+
 #define MOTOR_CHANNELS 2
 #define SERVO_CHANNELS 2
 
 #define PID_PERIOD 20000 // 10ms in microseconds
 
-#define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10
-
 #define MOTOR_DEFAULT_PERIOD 1000 // 1ms in microseconds
 #define SERVO_DEFAULT_FREQ   50 // Frequency in Hertz. Set frequency at 50 Hz
+
+#define MOTOR_CONTROL_LOCK_TIMEOUT_MS 10 // For getting semaphore
 
 extern const int PCNT_GPIO[MOTOR_CHANNELS][2];
 extern const int MOTOR_GPIO[MOTOR_CHANNELS][2];
