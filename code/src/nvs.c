@@ -30,8 +30,13 @@ void save_settings_to_nvs(motor_t *motors) {
 
 int get_settings_from_nvs(motor_t *motors) {
     settings_t settings;
-    size_t size;
-    ESP_ERROR_CHECK(nvs_get_blob(nvs_default_partition_handle, "settings", &settings, &size));
+    size_t size = sizeof(settings);
+    esp_err_t err = nvs_get_blob(nvs_default_partition_handle, "settings", &settings, &size);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return -1; // No valid settings found
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
     if (settings.identifier != 0x56010101) {
         return -1; // No valid settings found
     }

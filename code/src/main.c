@@ -361,18 +361,18 @@ void app_main(void)
     i2c_slave_context_t context = {0};
     init_i2c_slave_context(&context);
 
+    // Setup semaphores for motor settings
+    for (int i = 0; i < MOTOR_CHANNELS; i++) {
+        motors_write_locks[i] = xSemaphoreCreateBinary();
+        xSemaphoreGive(motors_write_locks[i]);
+    }
+
     // Initialize Non-Volatile Storage (NVS)
     init_settings_nvs();
 
     // Initialize motor settings
     reset_to_factory_settings();
     get_settings_from_nvs(motors);
-
-    // Setup semaphores for motor control
-    for (int i = 0; i < MOTOR_CHANNELS; i++) {
-        motors_write_locks[i] = xSemaphoreCreateBinary();
-        xSemaphoreGive(motors_write_locks[i]);
-    }
  
     // Initialize servo pins
     servo_init(SERVO_PINS, sizeof(SERVO_PINS) / sizeof(SERVO_PINS[0]));
