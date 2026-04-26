@@ -374,7 +374,7 @@ void i2c_run_to_position(i2c_slave_context_t context) {
         return;
     }
 
-    struct {
+    struct __attribute__((packed)) {
         uint8_t relative;
         float position;
         uint16_t max_speed;
