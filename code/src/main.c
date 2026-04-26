@@ -26,15 +26,9 @@ static void motor_control() {
         ESP_ERROR_CHECK(pcnt_unit_get_count(motors[i].pcnt_unit, &steps));
         motors[i].speed = (steps - motors[i].steps) * 1000000 / PID_PERIOD; // Convert to pulses per second
         motors[i].steps = steps;
-        xSemaphoreGiveFromISR(motors_write_locks[i], NULL);
 
-        // Update motor control based on operating mode
-        if (xSemaphoreTakeFromISR(motors_write_locks[i], NULL) == pdFALSE) {
-            continue;
-        }
         if (motors[i].mode == MOTOR_OP_RUN_DC) {
             // motor_set_dc should be called by the function that sets the DC, so we don't need to do anything here
-            continue;
         } else if (motors[i].mode == MOTOR_OP_RUN_SPEED) {
             int dc = 0;
             if (motors[i].speed_pid.setpoint == 0 && motors[i].speed == 0) {
